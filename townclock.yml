@@ -1,0 +1,86 @@
+Parameters:
+  ParameterName:
+    Type: String
+    Default: /TownClock
+    Description: Parameter MUST have slash at start of name.
+Resources:
+  Parameter:
+    Type: AWS::SSM::Parameter
+    Properties: 
+      Name: !Ref ParameterName
+      Description: >
+        A parameter that is updated every minute. Useful as a dummy 
+        parameter in CloudFormation stacks.
+      Type: String
+      Value: startingval
+  Schedule:
+    Type: AWS::Events::Rule
+    Properties:
+      ScheduleExpression: rate(1 minute)
+      Targets:
+        - Id: TownClockLambda
+          Arn: !GetAtt Function.Arn
+  Permission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt Function.Arn
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt Schedule.Arn
+  Function:
+    Type: AWS::Lambda::Function
+    Properties:
+      Handler: index.handler
+      Role: !GetAtt Role.Arn
+      Description: >
+        A function that updates an SSM parameter every minute.
+      Runtime: nodejs6.10
+      Timeout: 60
+      Code:
+        ZipFile: |
+          var aws = require('aws-sdk');
+          var ssm = new aws.SSM();
+
+          exports.handler = function(event, context, callback) {
+            console.log(JSON.stringify(event));
+
+            let value = Date.now().toString();
+            var params = {
+              Name: process.env.PARAMETER_NAME,
+              Type: "String",
+              Value: value,
+              Overwrite: true
+            };
+
+            ssm.putParameter(params, callback);
+          }
+      Environment:
+        Variables:
+          PARAMETER_NAME: !Ref ParameterName
+  Role:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action: sts:AssumeRole
+            Principal:
+              Service: lambda.amazonaws.com
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies: 
+        - PolicyName: AllowPstorePut
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: ssm:PutParameter
+                Resource: !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ParameterName}
+Outputs:
+  Function:
+    Value: !Ref Function
+  Role:
+    Value: !Ref Role
+  Schedule:
+    Value: !Ref Schedule
